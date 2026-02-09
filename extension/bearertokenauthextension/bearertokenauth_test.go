@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configopaque"
 	"go.uber.org/zap/zaptest"
@@ -445,4 +446,81 @@ func TestCustomHeaderAuthenticate(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.NoError(t, bauth.Shutdown(t.Context()))
+}
+
+// TestBearerTokenFileTokenRotationWithSymlink verifies that a token is refreshed when the backing file is rotated
+// using the Kubernetes-style atomic symlink swap.
+func TestBearerTokenFileTokenRotationWithSymlink(t *testing.T) {
+	mountDir := t.TempDir()
+
+	// Initial timestamped directory with token file
+	ts1Dir := filepath.Join(mountDir, "..ts_1")
+	require.NoError(t, os.Mkdir(ts1Dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(ts1Dir, "token"), []byte("foo"), 0o600))
+
+	// Symlink ..data -> ..ts_1
+	require.NoError(t, os.Symlink("..ts_1", filepath.Join(mountDir, "..data")))
+	// Symlink token -> ..data/token
+	require.NoError(t, os.Symlink(filepath.Join("..data", "token"), filepath.Join(mountDir, "token")))
+
+	tokenFile := filepath.Join(mountDir, "token")
+
+	// Sanity-check that reading the token file through the symlink chain works
+	got, err := os.ReadFile(tokenFile)
+	require.NoError(t, err)
+	require.Equal(t, "foo", string(got))
+
+	// Configure and start the extension using our token file
+	cfg := createDefaultConfig().(*Config)
+	cfg.Filename = tokenFile
+
+	bauth := newBearerTokenAuth(cfg, zaptest.NewLogger(t))
+	require.NoError(t, bauth.Start(t.Context(), componenttest.NewNopHost()))
+	defer func() { require.NoError(t, bauth.Shutdown(t.Context())) }()
+
+	credential, err := bauth.PerRPCCredentials()
+	require.NoError(t, err)
+
+	md, err := credential.GetRequestMetadata(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer foo", md["authorization"])
+
+	// Swap the token
+	replaceTokenFileBySymlinkSwap(t, mountDir, "bar", "..ts_1", "..ts_2")
+
+	// Give fsnotify time to deliver the event and refreshToken() to run
+	assert.Eventually(t, func() bool {
+		md, err = credential.GetRequestMetadata(t.Context())
+		assert.NoError(t, err)
+
+		return md["authorization"] == "Bearer bar"
+	}, 5*time.Second, 50*time.Millisecond, "token was not refreshed after symlink rotation")
+}
+
+// Mimics how Kubernetes updates a volume mount backed by a ConfigMap, Secret or service account token volume projection.
+// Example where the token file is mounted at /var/run/secrets/foo/token:
+//
+//	/var/run/secrets/foo/
+//	  ..data           -> ..ts_1/       (symlink to timestamped dir)
+//	  ..ts_1/
+//	    token                            (actual file)
+//	  token            -> ..data/token  (symlink through ..data)
+//
+// On rotation the kubelet creates a new timestamped dir, writes the new content,
+// atomically swaps the ..data symlink via a rename, and cleans up the old timestamped dir.
+func replaceTokenFileBySymlinkSwap(t *testing.T, mountDir, newToken, oldTS, newTS string) {
+	t.Helper()
+
+	newTSDir := filepath.Join(mountDir, newTS)
+	require.NoError(t, os.Mkdir(newTSDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(newTSDir, "token"), []byte(newToken), 0o600))
+
+	// Atomic swap: create tmp symlink, rename over ..data
+	tmpLink := filepath.Join(mountDir, "..data_tmp")
+	require.NoError(t, os.Symlink(newTS, tmpLink))
+	require.NoError(t, os.Rename(tmpLink, filepath.Join(mountDir, "..data")))
+
+	// Kubelet removes the old timestamped directory after the swap.
+	// This deletion is what fires the Remove event on the watched inode.
+	require.NoError(t, os.RemoveAll(filepath.Join(mountDir, oldTS)))
 }

@@ -1,0 +1,13 @@
+change_type: bug_fix
+
+component: extension/bearertokenauth
+
+note: "Revert to workaround for watching Kubernetes mounted token files"
+
+# TODO Need PR number
+# Mandatory: One or more tracking issues related to the change. You can use the PR number here if no issue exists.
+issues: []
+
+subtext: "Fixes regression introduced in #44104."
+
+change_logs: [user]
