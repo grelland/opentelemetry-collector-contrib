@@ -4,9 +4,8 @@ component: extension/bearertokenauth
 
 note: Reintroduces file watcher workaround for symlinked token files.
 
-issues: []
+issues: [45953]
 
-# TODO
 subtext: |
   In #44104, the token file watcher was rewritten to watch the parent dir of the file rather than the file itself.
   This change was made in an effort to avoid a race condition under which fsnotify would remove the watcher before the 
