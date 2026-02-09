@@ -2,12 +2,21 @@ change_type: bug_fix
 
 component: extension/bearertokenauth
 
-note: "Revert to workaround for watching Kubernetes mounted token files"
+note: Reintroduces file watcher workaround for symlinked token files.
 
-# TODO Need PR number
-# Mandatory: One or more tracking issues related to the change. You can use the PR number here if no issue exists.
 issues: []
 
-subtext: "Fixes regression introduced in #44104."
+# TODO
+subtext: |
+  In #44104, the token file watcher was rewritten to watch the parent dir of the file rather than the file itself.
+  This change was made in an effort to avoid a race condition under which fsnotify would remove the watcher before the 
+  event handler got to it, causing an error log.
+  This unintentionally broke the behaviour of the token file watcher under certain circumstances - most notably for 
+  mounted ConfigMaps, Secrets and serviceAccountToken projected volumes on Kubernetes.
+  The implementation is now close to the previous one, which includes a workaround specifically to support the 
+  aforementioned scenario: watching the file itself for the Remove and Chmod events, as well as Write.
+  Additionally, `fsnotify.ErrNonExistentWatch`, which indicates the double removal condition on the file watcher, is now 
+  silently ignored. 
+  
 
 change_logs: [user]
