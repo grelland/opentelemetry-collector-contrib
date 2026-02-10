@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -450,7 +451,13 @@ func TestCustomHeaderAuthenticate(t *testing.T) {
 
 // TestBearerTokenFileTokenRotationWithSymlink verifies that a token is refreshed when the backing file is rotated
 // using the Kubernetes-style atomic symlink swap.
+// This test is not applicable to Windows as atomic symlink swaps are not supported and the kubelet falls
+// back to a non-atomic Remove+Symlink strategy.
 func TestBearerTokenFileTokenRotationWithSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Atomic symlink swaps with rename(2) are not supported on Windows")
+	}
+
 	mountDir := t.TempDir()
 
 	// Initial timestamped directory with token file
