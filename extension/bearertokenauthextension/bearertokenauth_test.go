@@ -449,11 +449,11 @@ func TestCustomHeaderAuthenticate(t *testing.T) {
 	assert.NoError(t, bauth.Shutdown(t.Context()))
 }
 
-// TestBearerTokenFileTokenRotationWithSymlink verifies that a token is refreshed when the backing file is rotated
+// TestBearerTokenFileRefreshWithAtomicSymlinkSwap verifies that a token is refreshed when the backing file is rotated
 // using the Kubernetes-style atomic symlink swap.
 // This test is not applicable to Windows as atomic symlink swaps are not supported and the kubelet falls
 // back to a non-atomic Remove+Symlink strategy.
-func TestBearerTokenFileTokenRotationWithSymlink(t *testing.T) {
+func TestBearerTokenFileRefreshWithAtomicSymlinkSwap(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Atomic symlink swaps with rename(2) are not supported on Windows")
 	}
